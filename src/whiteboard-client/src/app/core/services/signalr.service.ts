@@ -24,7 +24,7 @@ export class SignalrService {
     // THE SENIOR SOLUTION: Taming the Firehose
     // Listen to local draw events, but only send the latest one every 20ms
     this.localDrawSubject.pipe(
-      auditTime(20) 
+      auditTime(10) 
     ).subscribe((action) => {
       if (this.hubConnection?.state === 'Connected') {
         this.hubConnection.invoke('Draw', this.boardId, action)

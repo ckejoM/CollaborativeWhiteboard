@@ -1,4 +1,7 @@
-import { Component, ElementRef, ViewChild, AfterViewInit } from '@angular/core';
+import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, inject } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { SignalrService } from '../../core/services/signalr.service';
+import { DrawAction } from '../../core/models/draw-action.model';
 
 @Component({
   selector: 'app-board',
@@ -6,28 +9,36 @@ import { Component, ElementRef, ViewChild, AfterViewInit } from '@angular/core';
   templateUrl: './board.component.html',
   styleUrl: './board.component.scss'
 })
-export class BoardComponent implements AfterViewInit {
+export class BoardComponent implements AfterViewInit, OnDestroy {
   @ViewChild('canvas', { static: true }) canvas!: ElementRef<HTMLCanvasElement>;
   
+  private signalrService = inject(SignalrService);
   private ctx!: CanvasRenderingContext2D;
   private isDrawing = false;
   
-  // Track the previous coordinates
   private prevX = 0;
   private prevY = 0;
+  private remoteDrawSub!: Subscription;
 
   ngAfterViewInit(): void {
     const canvasEl = this.canvas.nativeElement;
     this.ctx = canvasEl.getContext('2d')!;
 
-    // Set a fixed resolution for the canvas
+    // Fixed resolution
     canvasEl.width = 1000;
     canvasEl.height = 600;
 
-    // Canvas styling defaults
-    this.ctx.lineWidth = 3;
-    this.ctx.lineCap = 'round';
-    this.ctx.strokeStyle = '#000000'; // Default black ink
+    // 1. Subscribe to the remote stream (Incoming Data)
+    this.remoteDrawSub = this.signalrService.remoteDraw$.subscribe((action: DrawAction) => {
+      this.drawRemoteAction(action);
+    });
+  }
+
+  ngOnDestroy(): void {
+    // Senior practice: Always clean up subscriptions to prevent memory leaks
+    if (this.remoteDrawSub) {
+      this.remoteDrawSub.unsubscribe();
+    }
   }
 
   onMouseDown(e: MouseEvent): void {
@@ -42,9 +53,21 @@ export class BoardComponent implements AfterViewInit {
     const currentX = e.offsetX;
     const currentY = e.offsetY;
 
-    this.drawOnCanvas(this.prevX, this.prevY, currentX, currentY);
+    // 2. Local Instant Draw (Optimistic UI)
+    this.drawOnCanvas(this.prevX, this.prevY, currentX, currentY, '#000000', 3);
 
-    // Update previous coordinates for the next frame of movement
+    // 3. Push to RxJS Throttled Stream (Outgoing Data)
+    const action: DrawAction = {
+      sessionId: this.signalrService.getSessionId(),
+      prevX: this.prevX,
+      prevY: this.prevY,
+      currentX: currentX,
+      currentY: currentY,
+      color: '#000000', // Hardcoded for now, could be dynamic later
+      lineWidth: 3
+    };
+    this.signalrService.sendLocalDrawAction(action);
+
     this.prevX = currentX;
     this.prevY = currentY;
   }
@@ -53,12 +76,27 @@ export class BoardComponent implements AfterViewInit {
     this.isDrawing = false;
   }
 
-  // Extracted drawing method so we can reuse it when remote data arrives later
-  private drawOnCanvas(prevX: number, prevY: number, currentX: number, currentY: number): void {
+  // Extracted and enhanced with State Management
+  private drawOnCanvas(prevX: number, prevY: number, currentX: number, currentY: number, color: string, lineWidth: number): void {
+    this.ctx.save(); // Snapshot current brush settings
+    
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.lineCap = 'round';
+    
     this.ctx.beginPath();
     this.ctx.moveTo(prevX, prevY);
     this.ctx.lineTo(currentX, currentY);
     this.ctx.stroke();
     this.ctx.closePath();
+    
+    this.ctx.restore(); // Revert back to snapshot (prevents remote strokes from hijacking local colors)
+  }
+
+  private drawRemoteAction(action: DrawAction): void {
+    // Failsafe: Ignore our own messages if the backend grouping logic ever leaks
+    if (action.sessionId === this.signalrService.getSessionId()) return;
+
+    this.drawOnCanvas(action.prevX, action.prevY, action.currentX, action.currentY, action.color, action.lineWidth);
   }
 }
