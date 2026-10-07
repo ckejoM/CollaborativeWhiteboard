@@ -1,30 +1,31 @@
-# Collaborative Whiteboard (Real-Time Distributed State)
+# Collaborative Whiteboard
 
-> **Created by Jovan Madzic | Software Engineer, https://www.linkedin.com/in/jovan-madzic-12093b202/**
+A real-time shared whiteboard: open it in two browser windows, draw in one, and the lines appear in the other.
 
-## 🏗️ Architecture Overview
-This project is a production-grade, distributed real-time whiteboard. Unlike a basic single-server WebSocket implementation, this architecture is designed to sit behind a load balancer and scale horizontally.
+## Why I built it
+A single-server WebSocket demo is easy. I wanted to see what changes once there's more than one server instance: a client on server A has to see strokes drawn by a client on server B. This project is me working through that with SignalR and a Redis backplane.
 
-* **Backend:** ASP.NET Core Minimal APIs with SignalR.
-* **Horizontal Scaling:** StackExchange.Redis acts as a Pub/Sub backplane, ensuring that WebSocket connections on Server A can broadcast drawing coordinates to clients connected to Server B.
-* **Frontend:** Angular 17+ standalone components utilizing the HTML5 Canvas API.
-* **State Management:** RxJS handles the high-frequency stream of `mousemove` events, buffering and throttling the data before sending it over the network to prevent server flooding.
+## How it works
+- **Backend:** ASP.NET Core Minimal API with a SignalR hub.
+- **Scaling out:** the SignalR Redis backplane (StackExchange.Redis Pub/Sub) relays messages between server instances, so the app can run as several instances behind a load balancer.
+- **Frontend:** Angular standalone components drawing on an HTML5 Canvas.
+- **Throttling:** `mousemove` fires very often. RxJS (`auditTime`, tuned to 10 ms) batches points before they are sent, which keeps lines smooth without flooding the hub.
 
-## 🛠️ Tech Stack
-* **.NET 9** (C#, SignalR, Minimal API)
-* **Redis** (Dockerized for local testing, utilized as the SignalR Backplane)
-* **Angular 17** (TypeScript, RxJS, SCSS)
+## Stack
+.NET 9 · ASP.NET Core SignalR · Minimal APIs · Redis (Docker) · Angular 18 · TypeScript · RxJS · HTML5 Canvas · SCSS
 
-## 📝 Architectural Decisions & Tech Debt Log
-To keep the project scope focused on real-time infrastructure, the following architectural shortcuts were taken and would need to be addressed before a true production launch:
+## Run it locally
+1. Start Redis: `cd src && docker-compose up -d`
+2. Start the API: `cd src/Whiteboard.API && dotnet run`
+3. Start the client: `cd src/whiteboard-client && npm install && ng serve`
+4. Open `http://localhost:4200` in two or more browser windows.
 
-1. **Hardcoded Sessions:** The frontend currently hardcodes the `boardId` to `'global-board'`. *Resolution:* Implement dynamic routing in Angular (e.g., `/board/:id`) and pass that ID to the SignalR `JoinBoard` method.
-2. **Volatile State:** The whiteboard state exists only in the volatile UI of connected clients. If everyone disconnects, the drawing is lost. *Resolution:* Implement a background worker that periodically takes a snapshot of the coordinate arrays and saves them to a persistent database (like PostgreSQL or MongoDB) so late-joiners can fetch the existing board state.
-3. **RxJS Throttling Optimization:** The `auditTime` was tuned to `10ms` to provide a smooth line without stripping, balancing network payload size against visual fidelity.
-4. **Security/Authentication:** The SignalR Hub currently accepts anonymous connections. *Resolution:* Integrate JWT Bearer token authentication and map user claims to the SignalR `Context.UserIdentifier`.
+## Known shortcuts and what's next
+I kept the scope on the real-time part. These are the gaps I know about:
+1. **One board only.** The client hardcodes `boardId = 'global-board'`. Next: route `/board/:id` and pass the id to `JoinBoard`.
+2. **No persistence.** The drawing only lives in connected clients. If everyone leaves, it's gone. Next: a background worker that snapshots board state to Redis or a database.
+3. **No auth.** The hub accepts anonymous connections. Next: JWT bearer auth mapped to `Context.UserIdentifier`.
 
-## 🚀 How to Run Locally
-1. Start the Redis Backplane: `cd src/Whiteboard.API && docker-compose up -d`
-2. Start the .NET API: `cd src/Whiteboard.API && dotnet run`
-3. Start the Angular Client: `cd src/whiteboard-client && ng serve`
-4. Open `http://localhost:4200` in multiple browser windows to test the real-time synchronization.
+---
+
+Built by Jovan Madzic, Software Engineer in Belgrade · [LinkedIn](https://www.linkedin.com/in/jovan-madzic-12093b202/) · [GitHub](https://github.com/ckejoM)
